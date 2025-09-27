@@ -39,6 +39,10 @@ export class LimitReport {
     let maxMessages = parseInt(<string>process.env.MAX_MESSAGES) || 10;
     maxMessages = maxMessages > 10 || maxMessages < 0 ? 10 : maxMessages;
     const messages = await sqsHelper.receiveMessages(<string>process.env.SQS_URL, maxMessages);
+    logger.debug({
+      label: this.moduleName,
+      message: `messages dequeued from SQS:${JSON.stringify(messages)}`,
+    });
     await Promise.allSettled(
       messages.map(async (message) => {
         await this.putUsageItemOnDDB(message);

@@ -29,7 +29,7 @@ import { Layer } from "./lambda-layer.construct";
 import { EventsToLambda } from "./events-lambda.construct";
 import { CustomResourceLambda } from "./custom-resource-lambda.construct";
 import { StreamViewType } from "aws-cdk-lib/aws-dynamodb";
-import { EVENT_NOTIFICATION_DETAIL_TYPE, EVENT_NOTIFICATION_SOURCES, QUOTA_TABLE, SERVICE_TABLE } from "./exports";
+import { EVENT_NOTIFICATION_DETAIL_TYPE, EVENT_NOTIFICATION_SOURCES, LOG_LEVEL, QUOTA_TABLE, SERVICE_TABLE } from "./exports";
 import { DynamoEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 import { StartingPosition } from "aws-cdk-lib/aws-lambda";
 import { applyDependsOn } from "./depends.utils";
@@ -75,13 +75,13 @@ export class QuotaMonitorSQSpoke extends Stack {
 
     const frequency = new CfnParameter(this, "MonitoringFrequency", {
       type: "String",
-      default: "rate(12 hours)",
-      allowedValues: ["rate(6 hours)", "rate(12 hours)", "rate(1 day)"],
+      default: "rate(30 minutes)",
+      allowedValues: ["rate(30 minutes)", "rate(6 hours)", "rate(12 hours)", "rate(1 day)"],
     });
 
     const reportOKNotifications = new CfnParameter(this, "ReportOKNotifications", {
       type: "String",
-      default: "No",
+      default: "Yes",
       allowedValues: ["Yes", "No"],
     });
 
@@ -325,6 +325,7 @@ export class QuotaMonitorSQSpoke extends Stack {
         POLLER_FREQUENCY: frequency.valueAsString,
         THRESHOLD: threshold.valueAsString,
         REPORT_OK_NOTIFICATIONS: reportOKNotifications.valueAsString,
+        LOG_LEVEL: LOG_LEVEL.DEBUG,
       },
       memorySize: 512,
       layers: [utilsLayer.layer],

@@ -125,5 +125,9 @@ export class EventsHelper extends ServiceHelper<CloudWatchEventsClient> {
         await this.client.send(new PutEventsCommand({ Entries: chunk }));
       })
     );
+    logger.debug({
+      label: this.moduleName,
+      message: `sent to event bus ${JSON.stringify(entries)}`,
+    });
   }
 }

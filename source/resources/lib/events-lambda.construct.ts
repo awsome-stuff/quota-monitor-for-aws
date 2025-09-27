@@ -65,7 +65,7 @@ export class EventsToLambda<T extends QuotaMonitorEvent> extends Construct imple
       handler: "index.handler",
       environment: {
         ...props.environment,
-        LOG_LEVEL: this.node.tryGetContext("LOG_LEVEL") || LOG_LEVEL.INFO, //change as needed
+        LOG_LEVEL: this.node.tryGetContext("LOG_LEVEL") || LOG_LEVEL.DEBUG, //change as needed
         CUSTOM_SDK_USER_AGENT: `AwsSolution/${this.node.tryGetContext("SOLUTION_ID")}/${this.node.tryGetContext(
           "SOLUTION_VERSION"
         )}`,

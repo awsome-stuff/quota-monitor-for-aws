@@ -58,19 +58,41 @@ export const handler = async (event: any) => {
 
 async function handleQuotasForService(service: string) {
   const quotaItems = await getQuotasForService(<string>process.env.SQ_QUOTA_TABLE, service);
+  logger.debug({
+    label: `${MODULE_NAME}/handler/handleQuotasForService/QuotaItems for service '${service}'`,
+    message: JSON.stringify(quotaItems || 'no-items'),
+  });
   if (!quotaItems || quotaItems.length == 0) return; // no quota items found
+
   const queries = generateCWQueriesForAllQuotas(<ServiceQuota[]>quotaItems);
+  logger.debug({
+    label: `${MODULE_NAME}/handler/handleQuotasForService/CWQueries for service '${service}'`,
+    message: JSON.stringify(queries),
+  });
+
   const metricQueryIdToQuotaMap = generateMetricQueryIdMap(<ServiceQuota[]>quotaItems);
+  logger.debug({
+    label: `${MODULE_NAME}/handler/handleQuotasForService/MetricQueryIdToQuotaMap for service '${service}'`,
+    message: JSON.stringify(metricQueryIdToQuotaMap),
+  });
+
   const metrics = await getCWDataForQuotaUtilization(queries);
+  logger.debug({
+    label: `${MODULE_NAME}/handler/handleQuotasForService/Metrics for service '${service}'`,
+    message: JSON.stringify(metrics),
+  });
+
+  let countEvents = 0;
   await Promise.allSettled(
     metrics.map(async (metric) => {
       const utilizationEvents = createQuotaUtilizationEvents(metric, metricQueryIdToQuotaMap);
+      countEvents += utilizationEvents.length;
       logger.debug({
-        label: `${MODULE_NAME}/handler/UtilizationEvents`,
+        label: `${MODULE_NAME}/handler/handleQuotasForService/UtilizationEvents for metric id: '${metric.Id || "no-id"}'`,
         message: JSON.stringify(utilizationEvents),
       });
       await sendQuotaUtilizationEventsToBridge(<string>process.env.SPOKE_EVENT_BUS, utilizationEvents);
     })
   );
-  logger.debug(`${service} utilizationEvents sent to spoke event bridge bus`);
+  logger.debug(`${service} utilizationEvents sent to spoke event bridge bus (${countEvents})`);
 }

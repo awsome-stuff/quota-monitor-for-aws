@@ -25,7 +25,7 @@ import { ConditionAspect } from "./condition.utils";
 import { CustomResourceLambda } from "./custom-resource-lambda.construct";
 import { EventsToLambda } from "./events-lambda.construct";
 import { EventsToSQS } from "./events-sqs.construct";
-import { EVENT_NOTIFICATION_DETAIL_TYPE, EVENT_NOTIFICATION_SOURCES } from "./exports";
+import { EVENT_NOTIFICATION_DETAIL_TYPE, EVENT_NOTIFICATION_SOURCES, LOG_LEVEL } from "./exports";
 import { Layer } from "./lambda-layer.construct";
 import { EventsToLambdaToSNS } from "./events-lambda-sns.construct";
 import { KMS } from "./kms.construct";
@@ -62,7 +62,7 @@ export class QuotaMonitorHubNoOU extends Stack {
 
     const reportOKNotifications = new CfnParameter(this, "ReportOKNotifications", {
       type: "String",
-      default: "No",
+      default: "Yes",
       allowedValues: ["Yes", "No"],
     });
 
@@ -363,6 +363,7 @@ export class QuotaMonitorHubNoOU extends Stack {
         SQS_URL: summarizerEventQueue.target.queueUrl,
         MAX_MESSAGES: "10", //100 messages can be read with each invocation, change as needed
         MAX_LOOPS: "10",
+        LOG_LEVEL: LOG_LEVEL.DEBUG,
       },
       memorySize: 512,
       timeout: Duration.seconds(10),
