@@ -35,16 +35,21 @@ export class DashboardETL {
       return;
     }
 
-    logger.info({
+    logger.debug({
       label: this.moduleName,
       message: `Processing ${limitCodes.length} limit codes: ${limitCodes.join(", ")}`,
     });
 
     // Process each limit code
-    const dashboardData: {[limitCode: string]: any} = {};
+    const dashboardData: { [limitCode: string]: any } = {};
     for (const limitCode of limitCodes) {
       const allRecords = await this.scanQuotaTable(limitCode); // Scan DynamoDB table for all records
       const latestRecord = this.getLatestRecordForLimitCode(allRecords);
+
+      logger.debug({
+        label: this.moduleName,
+        message: `Processing limit code: '${limitCode}'. Latest record retrieved: ${latestRecord ? JSON.stringify(latestRecord) : "none"}`,
+      });
 
       if (latestRecord) {
         dashboardData[limitCode] = {
