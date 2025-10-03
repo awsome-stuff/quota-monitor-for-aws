@@ -9,6 +9,7 @@
     "precommit": "pre-commit run --all-files",
     "prettier-format": "./node_modules/prettier/bin-prettier.js --config .prettierrc.yml '**/*.ts' --write",
     "build:cwPoller": "cd source/lambda/services/cwPoller && npm run build:all",
+    "build:dashboardETL": "cd source/lambda/services/dashboardETL && npm run build:all",
     "build:deploymentManager": "cd source/lambda/services/deploymentManager && npm run build:all",
     "build:helper": "cd source/lambda/services/helper && npm run build:all",
     "build:preReqManager": "cd source/lambda/services/preReqManager && npm run build:all",
@@ -18,7 +19,7 @@
     "build:snsPublisher": "cd source/lambda/services/snsPublisher && npm run build:all",
     "build:taRefresher": "cd source/lambda/services/taRefresher && npm run build:all",
     "build:utilsLayer": "cd source/lambda/utilsLayer && npm run build:all",
-    "build:all": "npm run build:utilsLayer && npm run build:cwPoller && npm run build:deploymentManager && npm run build:helper && npm run build:preReqManager && npm run build:quotaListManager && npm run build:reporter && npm run build:slackNotifier && npm run build:snsPublisher && npm run build:taRefresher",
+    "build:all": "npm run build:utilsLayer && npm run build:cwPoller && npm run build:dashboardETL && npm run build:deploymentManager && npm run build:helper && npm run build:preReqManager && npm run build:quotaListManager && npm run build:reporter && npm run build:slackNotifier && npm run build:snsPublisher && npm run build:taRefresher",
     "test": "cd ./deployment && chmod +x run-unit-tests.sh && ./run-unit-tests.sh"
   },
   "devDependencies": {

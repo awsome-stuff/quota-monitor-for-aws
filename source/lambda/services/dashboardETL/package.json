@@ -1,0 +1,35 @@
+{
+  "name": "dashboard-etl",
+  "version": "1.0.0",
+  "description": "microservice for ETL service for Quota Monitor",
+  "author": {
+    "name": "Amazon Web Services",
+    "url": "https://aws.amazon.com/solutions"
+  },
+  "license": "Apache-2.0",
+  "main": "./index.js",
+  "scripts": {
+    "pretest": "npm ci",
+    "test": "npx jest",
+    "build:clean": "rm -rf ./node_modules && rm -rf ./dist",
+    "build:ts": "npx tsc --project ./tsconfig.json",
+    "postinstall": "npm run build:ts",
+    "build:copy": "cp -r ./node_modules ./dist/services/dashboardETL",
+    "build:zip": "cd ./dist/services/dashboardETL && zip -rq dashboard-etl.zip . && mv dashboard-etl.zip ../../",
+    "build:all": "npm run build:clean && npm ci && npm prune --production && npm run build:copy && npm run build:zip"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.806.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.15.17",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.3.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "jestSonar": {
+    "reportPath": "coverage"
+  }
+}

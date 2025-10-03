@@ -7,6 +7,7 @@ import {
   aws_events as events,
   aws_sns as sns,
   aws_ssm as ssm,
+  aws_s3 as s3,
   App,
   CfnCondition,
   CfnParameter,
@@ -66,6 +67,13 @@ export class QuotaMonitorHubNoOU extends Stack {
       allowedValues: ["Yes", "No"],
     });
 
+    const dashboardETLFrequency = new CfnParameter(this, "DashboardETLFrequency", {
+      type: "String",
+      default: "rate(5 minutes)",
+      allowedValues: ["rate(5 minutes)", "rate(15 minutes)", "rate(30 minutes)", "rate(1 hour)"],
+      description: "Frequency to run dashboard ETL process",
+    });
+
     //=============================================================================================
     // Mapping & Conditions
     //=============================================================================================
@@ -75,6 +83,7 @@ export class QuotaMonitorHubNoOU extends Stack {
     map.setValue("SSMParameters", "SlackHook", "/QuotaMonitor/SlackHook");
     map.setValue("SSMParameters", "Accounts", "/QuotaMonitor/Accounts");
     map.setValue("SSMParameters", "NotificationMutingConfig", "/QuotaMonitor/NotificationConfiguration");
+    map.setValue("SSMParameters", "DashboardLimitCodes", "/QuotaMonitor/DashboardLimitCodes");
 
     const emailTrue = new CfnCondition(this, "EmailTrueCondition", {
       expression: Fn.conditionNot(Fn.conditionEquals(snsEmail.valueAsString, "")),
@@ -100,6 +109,12 @@ export class QuotaMonitorHubNoOU extends Stack {
             },
             Parameters: ["SNSEmail", "SlackNotification", "ReportOKNotifications"],
           },
+          {
+            Label: {
+              default: "Dashboard Configuration",
+            },
+            Parameters: ["DashboardETLFrequency"],
+          },
         ],
         ParameterLabels: {
           SNSEmail: {
@@ -110,6 +125,9 @@ export class QuotaMonitorHubNoOU extends Stack {
           },
           ReportOKNotifications: {
             default: "Report OK Notifications",
+          },
+          DashboardETLFrequency: {
+            default: "Dashboard ETL Frequency",
           },
         },
       },
@@ -350,6 +368,17 @@ export class QuotaMonitorHubNoOU extends Stack {
       encryptionKey: kms.key,
       timeToLiveAttribute: "ExpiryTime",
     });
+    summaryTable.addGlobalSecondaryIndex({
+      indexName: "LimitCodeIndex",
+      partitionKey: {
+        name: "LimitCode",
+        type: dynamodb.AttributeType.STRING,
+      },
+      sortKey: {
+        name: "TimeStamp",
+        type: dynamodb.AttributeType.STRING,
+      },
+    });
 
     /**
      * @description event-lambda construct for capturing quota summary
@@ -445,6 +474,84 @@ export class QuotaMonitorHubNoOU extends Stack {
     });
     deploymentManager.target.addToRolePolicy(helperSSMReadPolicy);
 
+    //==============================
+    // Dashboard ETL components
+    //==============================
+    /**
+     * @description list of limit codes to include in dashboard
+     */
+    const ssmDashboardLimitCodes = new ssm.StringListParameter(this, "QM-DashboardLimitCodes", {
+      parameterName: map.findInMap("SSMParameters", "DashboardLimitCodes"),
+      stringListValue: ["L-1216C47A", "L-0485CB21", "L-B99A9384", "L-F98FE922"],
+      description: "List of LimitCodes to include in QuickSight dashboard",
+      simpleName: false,
+    });
+
+    /**
+     * @description S3 bucket for dashboard data
+     */
+    const dashboardBucket = new s3.Bucket(this, "QM-DashboardBucket", {
+      encryption: s3.BucketEncryption.KMS,
+      encryptionKey: kms.key,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      serverAccessLogsPrefix: "access-logs/",
+    });
+
+    /**
+     * @description construct for dashboard ETL lambda
+     */
+    const dashboardETL = new EventsToLambda<events.Schedule>(this, "QM-DashboardETL", {
+      eventRule: events.Schedule.expression(dashboardETLFrequency.valueAsString),
+      assetLocation: `${path.dirname(__dirname)}/../lambda/services/dashboardETL/dist/dashboard-etl.zip`,
+      environment: {
+        QUOTA_TABLE: summaryTable.tableName,
+        DASHBOARD_BUCKET: dashboardBucket.bucketName,
+        DASHBOARD_LIMIT_CODES_PARAMETER: ssmDashboardLimitCodes.parameterName,
+        LOG_LEVEL: LOG_LEVEL.DEBUG,
+      },
+      memorySize: 512,
+      timeout: Duration.minutes(5),
+      layers: [utilsLayer.layer],
+    });
+    addCfnGuardSuppression(dashboardETL.target, ["LAMBDA_INSIDE_VPC", "LAMBDA_CONCURRENCY_CHECK"]);
+
+    // adding dynamodb permissions to dashboard ETL lambda
+    dashboardETL.target.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["dynamodb:Scan", "dynamodb:Query"],
+        effect: iam.Effect.ALLOW,
+        resources: [summaryTable.tableArn, `${summaryTable.tableArn}/index/*`],
+      })
+    );
+
+    // adding S3 permissions to dashboard ETL lambda
+    dashboardETL.target.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:PutObject", "s3:PutObjectAcl"],
+        effect: iam.Effect.ALLOW,
+        resources: [`${dashboardBucket.bucketArn}/*`],
+      })
+    );
+
+    // adding SSM permissions to dashboard ETL lambda
+    dashboardETL.target.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["ssm:GetParameter"],
+        effect: iam.Effect.ALLOW,
+        resources: [ssmDashboardLimitCodes.parameterArn],
+      })
+    );
+    
+    // adding KMS permissions to dashboard ETL lambda
+    dashboardETL.target.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"],
+        effect: iam.Effect.ALLOW,
+        resources: [kms.key.keyArn],
+      })
+    );
+
     /**
      * used to check whether trusted advisor is available (have the support plan needed) in the account
      */
@@ -477,6 +584,16 @@ export class QuotaMonitorHubNoOU extends Stack {
     new CfnOutput(this, "SNSTopic", {
       value: snsPublisher.snsTopic.topicArn,
       description: "The SNS Topic where notifications are published to",
+    });
+
+    new CfnOutput(this, "DashboardBucket", {
+      value: dashboardBucket.bucketName,
+      description: "S3 bucket containing dashboard data for QuickSight",
+    });
+
+    new CfnOutput(this, "DashboardLimitCodesParameter", {
+      value: ssmDashboardLimitCodes.parameterName,
+      description: "SSM parameter for dashboard limit codes list",
     });
   }
 }

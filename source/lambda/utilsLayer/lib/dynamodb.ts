@@ -140,6 +140,31 @@ export class DynamoDBHelper extends ServiceHelper<DynamoDBClient> {
   }
 
   /**
+   * @description query items using ddb document client for given limit code
+   * @param tableName - quota table name
+   * @param limitCode - limit code for which to fetch quota info
+   * @returns
+   */
+  @catchDecorator(DynamoDBServiceException, false)
+  async queryQuotaUsageInfosForLimitCode(tableName: string, limitCode: string) {
+    logger.debug({
+      label: this.moduleName,
+      message: `getting quota usage items from ${tableName} for ${limitCode}`,
+    });
+    const response = await this.ddbDocClient.send(
+      new QueryCommand({
+        TableName: tableName,
+        IndexName: "LimitCodeIndex", // GSI on LimitCode
+        KeyConditionExpression: "LimitCode = :value",
+        ExpressionAttributeValues: {
+          ":value": limitCode,
+        },
+      })
+    );
+    return response.Items;
+  }
+
+  /**
    * @description deletes multiple quotas for a service from ddb
    * @param tableName
    * @param deleteRequests
