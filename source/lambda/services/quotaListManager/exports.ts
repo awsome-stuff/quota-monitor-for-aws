@@ -215,6 +215,10 @@ export function readDynamoDBStreamEvent(event: Record<string, any>) {
  */
 export async function putQuotasForService(serviceCode: string) {
   const _quotas = await _getQuotasWithUtilizationMetrics(serviceCode);
+  logger.debug({
+    label: `${MODULE_NAME}/putQuotasForService`,
+    message: `Processing quotas (service: ${serviceCode}): ${JSON.stringify(_quotas)}`,
+  });
   await _putMonitoredQuotas(_quotas, <string>process.env.SQ_QUOTA_TABLE);
 }
 
@@ -311,18 +315,30 @@ export async function handleDynamoDBStreamEvent(event: Record<string, any>) {
   const _record = <_Record>event.Records[0];
   switch (readDynamoDBStreamEvent(event)) {
     case "INSERT": {
+      logger.debug({
+        label: `${MODULE_NAME}/handleDynamoDBStreamEvent`,
+        message: `Record to INSERT: ${JSON.stringify(_record)}`,
+      });
       if (_record.dynamodb?.NewImage?.Monitored?.BOOL === true) {
         await putQuotasForService(<string>_record.dynamodb?.NewImage?.ServiceCode.S);
       }
       break;
     }
     case "MODIFY": {
+      logger.debug({
+        label: `${MODULE_NAME}/handleDynamoDBStreamEvent`,
+        message: `Record to MODIFY: ${JSON.stringify(_record)}`,
+      });
       await deleteQuotasForService(<string>_record.dynamodb?.NewImage?.ServiceCode.S);
       if (_record.dynamodb?.NewImage?.Monitored?.BOOL)
         await putQuotasForService(<string>_record.dynamodb?.NewImage?.ServiceCode.S);
       break;
     }
     case "REMOVE": {
+      logger.debug({
+        label: `${MODULE_NAME}/handleDynamoDBStreamEvent`,
+        message: `Record to REMOVE: ${JSON.stringify(_record)}`,
+      });
       await deleteQuotasForService(<string>_record.dynamodb?.OldImage?.ServiceCode.S);
       break;
     }

@@ -542,13 +542,55 @@ export class QuotaMonitorHubNoOU extends Stack {
         resources: [ssmDashboardLimitCodes.parameterArn],
       })
     );
-    
+
     // adding KMS permissions to dashboard ETL lambda
     dashboardETL.target.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"],
         effect: iam.Effect.ALLOW,
         resources: [kms.key.keyArn],
+      })
+    );
+
+    /**
+     * @description Bucket policy to allow QuickSight access
+     */
+    dashboardBucket.addToResourcePolicy(
+      new iam.PolicyStatement({
+        sid: "QuickSightAccess",
+        effect: iam.Effect.ALLOW,
+        principals: [
+          new iam.ServicePrincipal("quicksight.amazonaws.com"),
+          new iam.ArnPrincipal(`arn:aws:iam::${this.account}:role/service-role/aws-quicksight-service-role-v0`)
+        ],
+        actions: ["s3:GetObject", "s3:ListBucket", "s3:GetBucketLocation"],
+        resources: [dashboardBucket.bucketArn, `${dashboardBucket.bucketArn}/*`],
+        // conditions: {
+        //   StringEquals: {
+        //     "aws:SourceAccount": this.account
+        //   }
+        // }
+      })
+    );
+
+    /**
+     * @description KMS key policy to allow QuickSight decrypt
+     */
+    kms.key.addToResourcePolicy(
+      new iam.PolicyStatement({
+        sid: "QuickSightKMSAccess",
+        effect: iam.Effect.ALLOW,
+        principals: [
+          new iam.ServicePrincipal("quicksight.amazonaws.com"),
+          new iam.ArnPrincipal(`arn:aws:iam::${this.account}:role/service-role/aws-quicksight-service-role-v0`)
+        ],
+        actions: ["kms:Decrypt", "kms:GenerateDataKey"],
+        resources: ["*"],
+        // conditions: {
+        //   StringEquals: {
+        //     "aws:SourceAccount": this.account
+        //   }
+        // }
       })
     );
 
