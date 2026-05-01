@@ -8,6 +8,9 @@ import {
   aws_sns as sns,
   aws_ssm as ssm,
   aws_s3 as s3,
+  aws_grafana as grafana,
+  aws_athena as athena,
+  aws_sam as sam,
   App,
   CfnCondition,
   CfnParameter,
@@ -21,6 +24,7 @@ import {
 } from "aws-cdk-lib";
 import { Subscription } from "aws-cdk-lib/aws-sns";
 import { addCfnGuardSuppression, addCfnGuardSuppressionToNestedResources } from "./cfn-guard-utils";
+import { NagSuppressions } from "cdk-nag";
 import * as path from "path";
 import { ConditionAspect } from "./condition.utils";
 import { CustomResourceLambda } from "./custom-resource-lambda.construct";
@@ -477,122 +481,137 @@ export class QuotaMonitorHubNoOU extends Stack {
     //==============================
     // Dashboard ETL components
     //==============================
-    /**
-     * @description list of limit codes to include in dashboard
-     */
-    const ssmDashboardLimitCodes = new ssm.StringListParameter(this, "QM-DashboardLimitCodes", {
-      parameterName: map.findInMap("SSMParameters", "DashboardLimitCodes"),
-      stringListValue: ["L-1216C47A", "L-0485CB21", "L-B99A9384", "L-F98FE922"],
-      description: "List of LimitCodes to include in QuickSight dashboard",
-      simpleName: false,
-    });
+    const enableDashboardETL = this.node.tryGetContext("ENABLE_DASHBOARD_ETL") !== "false";
+    if (enableDashboardETL) {
 
-    /**
-     * @description S3 bucket for dashboard data
-     */
-    const dashboardBucket = new s3.Bucket(this, "QM-DashboardBucket", {
-      encryption: s3.BucketEncryption.KMS,
-      encryptionKey: kms.key,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      enforceSSL: true,
-      serverAccessLogsPrefix: "access-logs/",
-    });
+      /**
+       * @description list of limit codes to include in dashboard
+       */
+      const ssmDashboardLimitCodes = new ssm.StringListParameter(this, "QM-DashboardLimitCodes", {
+        parameterName: map.findInMap("SSMParameters", "DashboardLimitCodes"),
+        stringListValue: ["L-1216C47A", "L-0485CB21", "L-B99A9384", "L-F98FE922"],
+        description: "List of LimitCodes to include in QuickSight dashboard",
+        simpleName: false,
+      });
 
-    /**
-     * @description construct for dashboard ETL lambda
-     */
-    const dashboardETL = new EventsToLambda<events.Schedule>(this, "QM-DashboardETL", {
-      eventRule: events.Schedule.expression(dashboardETLFrequency.valueAsString),
-      assetLocation: `${path.dirname(__dirname)}/../lambda/services/dashboardETL/dist/dashboard-etl.zip`,
-      environment: {
-        QUOTA_TABLE: summaryTable.tableName,
-        DASHBOARD_BUCKET: dashboardBucket.bucketName,
-        DASHBOARD_LIMIT_CODES_PARAMETER: ssmDashboardLimitCodes.parameterName,
-        LOG_LEVEL: LOG_LEVEL.DEBUG,
-      },
-      memorySize: 512,
-      timeout: Duration.minutes(5),
-      layers: [utilsLayer.layer],
-    });
-    addCfnGuardSuppression(dashboardETL.target, ["LAMBDA_INSIDE_VPC", "LAMBDA_CONCURRENCY_CHECK"]);
+      /**
+       * @description S3 bucket for dashboard data
+       */
+      const dashboardBucket = new s3.Bucket(this, "QM-DashboardBucket", {
+        encryption: s3.BucketEncryption.KMS,
+        encryptionKey: kms.key,
+        blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+        enforceSSL: true,
+        serverAccessLogsPrefix: "access-logs/",
+      });
 
-    // adding dynamodb permissions to dashboard ETL lambda
-    dashboardETL.target.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ["dynamodb:Scan", "dynamodb:Query"],
-        effect: iam.Effect.ALLOW,
-        resources: [summaryTable.tableArn, `${summaryTable.tableArn}/index/*`],
-      })
-    );
+      /**
+       * @description construct for dashboard ETL lambda
+       */
+      const dashboardETL = new EventsToLambda<events.Schedule>(this, "QM-DashboardETL", {
+        eventRule: events.Schedule.expression(dashboardETLFrequency.valueAsString),
+        assetLocation: `${path.dirname(__dirname)}/../lambda/services/dashboardETL/dist/dashboard-etl.zip`,
+        environment: {
+          QUOTA_TABLE: summaryTable.tableName,
+          DASHBOARD_BUCKET: dashboardBucket.bucketName,
+          DASHBOARD_LIMIT_CODES_PARAMETER: ssmDashboardLimitCodes.parameterName,
+          LOG_LEVEL: LOG_LEVEL.DEBUG,
+        },
+        memorySize: 512,
+        timeout: Duration.minutes(5),
+        layers: [utilsLayer.layer],
+      });
+      addCfnGuardSuppression(dashboardETL.target, ["LAMBDA_INSIDE_VPC", "LAMBDA_CONCURRENCY_CHECK"]);
 
-    // adding S3 permissions to dashboard ETL lambda
-    dashboardETL.target.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ["s3:PutObject", "s3:PutObjectAcl"],
-        effect: iam.Effect.ALLOW,
-        resources: [`${dashboardBucket.bucketArn}/*`],
-      })
-    );
+      // adding dynamodb permissions to dashboard ETL lambda
+      dashboardETL.target.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["dynamodb:Scan", "dynamodb:Query"],
+          effect: iam.Effect.ALLOW,
+          resources: [summaryTable.tableArn, `${summaryTable.tableArn}/index/*`],
+        })
+      );
 
-    // adding SSM permissions to dashboard ETL lambda
-    dashboardETL.target.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ["ssm:GetParameter"],
-        effect: iam.Effect.ALLOW,
-        resources: [ssmDashboardLimitCodes.parameterArn],
-      })
-    );
+      // adding S3 permissions to dashboard ETL lambda
+      dashboardETL.target.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["s3:PutObject", "s3:PutObjectAcl"],
+          effect: iam.Effect.ALLOW,
+          resources: [`${dashboardBucket.bucketArn}/*`],
+        })
+      );
 
-    // adding KMS permissions to dashboard ETL lambda
-    dashboardETL.target.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"],
-        effect: iam.Effect.ALLOW,
-        resources: [kms.key.keyArn],
-      })
-    );
+      // adding SSM permissions to dashboard ETL lambda
+      dashboardETL.target.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["ssm:GetParameter"],
+          effect: iam.Effect.ALLOW,
+          resources: [ssmDashboardLimitCodes.parameterArn],
+        })
+      );
 
-    /**
-     * @description Bucket policy to allow QuickSight access
-     */
-    dashboardBucket.addToResourcePolicy(
-      new iam.PolicyStatement({
-        sid: "QuickSightAccess",
-        effect: iam.Effect.ALLOW,
-        principals: [
-          new iam.ServicePrincipal("quicksight.amazonaws.com"),
-          new iam.ArnPrincipal(`arn:aws:iam::${this.account}:role/service-role/aws-quicksight-service-role-v0`)
-        ],
-        actions: ["s3:GetObject", "s3:ListBucket", "s3:GetBucketLocation"],
-        resources: [dashboardBucket.bucketArn, `${dashboardBucket.bucketArn}/*`],
-        // conditions: {
-        //   StringEquals: {
-        //     "aws:SourceAccount": this.account
-        //   }
-        // }
-      })
-    );
+      // adding KMS permissions to dashboard ETL lambda
+      dashboardETL.target.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"],
+          effect: iam.Effect.ALLOW,
+          resources: [kms.key.keyArn],
+        })
+      );
 
-    /**
-     * @description KMS key policy to allow QuickSight decrypt
-     */
-    kms.key.addToResourcePolicy(
-      new iam.PolicyStatement({
-        sid: "QuickSightKMSAccess",
-        effect: iam.Effect.ALLOW,
-        principals: [
-          new iam.ServicePrincipal("quicksight.amazonaws.com"),
-          new iam.ArnPrincipal(`arn:aws:iam::${this.account}:role/service-role/aws-quicksight-service-role-v0`)
-        ],
-        actions: ["kms:Decrypt", "kms:GenerateDataKey"],
-        resources: ["*"],
-        // conditions: {
-        //   StringEquals: {
-        //     "aws:SourceAccount": this.account
-        //   }
-        // }
-      })
-    );
+      /**
+       * @description Bucket policy to allow QuickSight access
+       */
+      dashboardBucket.addToResourcePolicy(
+        new iam.PolicyStatement({
+          sid: "QuickSightAccess",
+          effect: iam.Effect.ALLOW,
+          principals: [
+            new iam.ServicePrincipal("quicksight.amazonaws.com"),
+            new iam.ArnPrincipal(`arn:aws:iam::${this.account}:role/service-role/aws-quicksight-service-role-v0`)
+          ],
+          actions: ["s3:GetObject", "s3:ListBucket", "s3:GetBucketLocation"],
+          resources: [dashboardBucket.bucketArn, `${dashboardBucket.bucketArn}/*`],
+          // conditions: {
+          //   StringEquals: {
+          //     "aws:SourceAccount": this.account
+          //   }
+          // }
+        })
+      );
+
+      /**
+       * @description KMS key policy to allow QuickSight decrypt
+       */
+      kms.key.addToResourcePolicy(
+        new iam.PolicyStatement({
+          sid: "QuickSightKMSAccess",
+          effect: iam.Effect.ALLOW,
+          principals: [
+            new iam.ServicePrincipal("quicksight.amazonaws.com"),
+            new iam.ArnPrincipal(`arn:aws:iam::${this.account}:role/service-role/aws-quicksight-service-role-v0`)
+          ],
+          actions: ["kms:Decrypt", "kms:GenerateDataKey"],
+          resources: ["*"],
+          // conditions: {
+          //   StringEquals: {
+          //     "aws:SourceAccount": this.account
+          //   }
+          // }
+        })
+      );
+
+      new CfnOutput(this, "DashboardBucket", {
+        value: dashboardBucket.bucketName,
+        description: "S3 bucket containing dashboard data for QuickSight",
+      });
+
+      new CfnOutput(this, "DashboardLimitCodesParameter", {
+        value: ssmDashboardLimitCodes.parameterName,
+        description: "SSM parameter for dashboard limit codes list",
+      });
+
+    } // end enableDashboardETL
 
     /**
      * used to check whether trusted advisor is available (have the support plan needed) in the account
@@ -603,6 +622,251 @@ export class QuotaMonitorHubNoOU extends Stack {
       resources: ["*"], // does not allow resource-level permissions
     });
     deploymentManager.target.addToRolePolicy(taDescribeTrustedAdvisorChecksPolicy);
+
+    //==============================
+    // Grafana integration
+    //
+    // Provisions Amazon Managed Grafana with Athena as the data source to query
+    // the DynamoDB summary table directly. The flow is:
+    //   Grafana → Athena (SQL) → DynamoDB connector Lambda → DynamoDB table
+    //
+    // Controlled by CDK context flag: -c ENABLE_GRAFANA=true
+    //==============================
+    const enableGrafana = this.node.tryGetContext("ENABLE_GRAFANA") === "true";
+    if (enableGrafana) {
+
+      /**
+       * @description S3 bucket used as scratch space by Athena.
+       * Athena requires an S3 location to write query results and the DynamoDB
+       * connector uses it as a spill bucket for large intermediate results.
+       * A 7-day lifecycle rule auto-cleans temporary files.
+       */
+      const athenaResultsBucket = new s3.Bucket(this, "QM-AthenaResultsBucket", {
+        encryption: s3.BucketEncryption.S3_MANAGED,
+        blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+        enforceSSL: true,
+        lifecycleRules: [{ expiration: Duration.days(7) }],
+      });
+      NagSuppressions.addResourceSuppressions(athenaResultsBucket, [
+        {
+          id: "AwsSolutions-S1",
+          reason: "Temporary scratch bucket for Athena query results with 7-day auto-expiry. Access logging not needed.",
+        },
+      ]);
+
+      /**
+       * @description Dedicated Athena workgroup for Grafana queries.
+       * Isolates Quota Monitor queries from other Athena usage in the account
+       * and enforces the output location so results always go to our bucket.
+       */
+      new athena.CfnWorkGroup(this, "QM-AthenaWorkgroup", {
+        name: "QuotaMonitorGrafana",
+        description: "Athena workgroup for Quota Monitor Grafana dashboard",
+        state: "ENABLED",
+        workGroupConfiguration: {
+          resultConfiguration: {
+            outputLocation: `s3://${athenaResultsBucket.bucketName}/results/`,
+          },
+          enforceWorkGroupConfiguration: true,
+        },
+      });
+
+      /**
+       * @description Pre-built Athena DynamoDB connector from the AWS Serverless Application Repository.
+       * Deploys a Lambda function that translates Athena SQL queries into DynamoDB
+       * scan/query operations. The applicationId points to us-east-1 because that's
+       * where AWS publishes the SAR application — the Lambda itself deploys in the
+       * current region.
+       */
+      const athenaDdbConnector = new sam.CfnApplication(this, "QM-AthenaDDBConnector", {
+        location: {
+          applicationId: "arn:aws:serverlessrepo:us-east-1:292517598671:applications/AthenaDynamoDBConnector",
+          semanticVersion: "2026.13.1",
+        },
+        parameters: {
+          AthenaCatalogName: "quota-monitor-ddb",
+          SpillBucket: athenaResultsBucket.bucketName,
+        },
+      });
+
+      /**
+       * @description Athena data catalog that registers the DynamoDB connector.
+       * This is the entry point for Athena to discover DynamoDB tables.
+       * In SQL queries, use: SELECT * FROM "quota-monitor-ddb"."default"."table_name"
+       * Must be created after the connector Lambda is deployed.
+       */
+      const athenaCatalog = new athena.CfnDataCatalog(this, "QM-AthenaCatalog", {
+        name: "quota-monitor-ddb",
+        type: "LAMBDA",
+        description: "Athena catalog for Quota Monitor DynamoDB tables",
+        parameters: {
+          function: `arn:aws:lambda:${this.region}:${this.account}:function:quota-monitor-ddb`,
+        },
+      });
+      athenaCatalog.addDependency(athenaDdbConnector);
+
+      /**
+       * @description Grant the DynamoDB connector Lambda KMS decrypt permission.
+       * The DynamoDB summary table is encrypted with a customer-managed KMS key.
+       * The connector Lambda (deployed via SAR) needs kms:Decrypt to read the table.
+       * Since the connector is in a nested stack with an auto-generated role name,
+       * we grant access via the KMS key resource policy using a condition that
+       * matches the connector's role name pattern. A KMS key resource policy grant
+       * works independently of the caller's IAM identity policy.
+       */
+      kms.key.addToResourcePolicy(
+        new iam.PolicyStatement({
+          sid: "AllowAthenaDDBConnectorDecrypt",
+          effect: iam.Effect.ALLOW,
+          principals: [new iam.AnyPrincipal()],
+          actions: ["kms:Decrypt"],
+          resources: ["*"],
+          conditions: {
+            "StringLike": {
+              "aws:PrincipalArn": `arn:aws:iam::${this.account}:role/*AthenaDDBCon*`,
+            },
+          },
+        })
+      );
+
+      /**
+       * @description IAM role assumed by the Managed Grafana workspace.
+       * Grants permissions for the full query chain:
+       *   Grafana → Athena → Glue catalog → DynamoDB connector Lambda → DynamoDB + KMS
+       * Also grants S3 access for Athena to write/read query results.
+       */
+      const grafanaRole = new iam.Role(this, "QM-GrafanaRole", {
+        assumedBy: new iam.ServicePrincipal("grafana.amazonaws.com"),
+        description: "IAM role for Amazon Managed Grafana workspace",
+      });
+
+      // Athena permissions: run queries, list catalogs/databases/tables
+      grafanaRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: [
+            "athena:GetQueryExecution",
+            "athena:GetQueryResults",
+            "athena:StartQueryExecution",
+            "athena:StopQueryExecution",
+          ],
+          effect: iam.Effect.ALLOW,
+          resources: [
+            `arn:aws:athena:${this.region}:${this.account}:workgroup/QuotaMonitorGrafana`,
+          ],
+        })
+      );
+      grafanaRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: [
+            "athena:ListWorkGroups",
+            "athena:GetWorkGroup",
+            "athena:ListDataCatalogs",
+            "athena:GetDataCatalog",
+            "athena:ListDatabases",
+            "athena:GetDatabase",
+            "athena:ListTableMetadata",
+            "athena:GetTableMetadata",
+          ],
+          effect: iam.Effect.ALLOW,
+          resources: ["*"],
+        })
+      );
+
+      // S3 permissions: Athena writes query results and reads them back
+      grafanaRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation"],
+          effect: iam.Effect.ALLOW,
+          resources: [athenaResultsBucket.bucketArn, `${athenaResultsBucket.bucketArn}/*`],
+        })
+      );
+
+      // Glue permissions: Athena uses Glue Data Catalog for table metadata discovery
+      grafanaRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: [
+            "glue:GetDatabase",
+            "glue:GetDatabases",
+            "glue:GetTable",
+            "glue:GetTables",
+            "glue:GetPartitions",
+          ],
+          effect: iam.Effect.ALLOW,
+          resources: ["*"],
+        })
+      );
+
+      // Lambda permissions: invoke the DynamoDB connector that Athena calls to read DynamoDB
+      grafanaRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: ["lambda:InvokeFunction"],
+          effect: iam.Effect.ALLOW,
+          resources: [`arn:aws:lambda:${this.region}:${this.account}:function:quota-monitor-ddb`],
+        })
+      );
+
+      // DynamoDB permissions: the connector reads the summary table and its indexes
+      grafanaRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: ["dynamodb:Scan", "dynamodb:Query", "dynamodb:DescribeTable"],
+          effect: iam.Effect.ALLOW,
+          resources: [summaryTable.tableArn, `${summaryTable.tableArn}/index/*`],
+        })
+      );
+
+      // KMS permissions: decrypt the customer-managed key used to encrypt the DynamoDB table
+      grafanaRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: ["kms:Decrypt"],
+          effect: iam.Effect.ALLOW,
+          resources: [kms.key.keyArn],
+        })
+      );
+
+      /**
+       * @description Amazon Managed Grafana workspace with SSO authentication.
+       * Users access the dashboard via the workspace URL and log in through
+       * AWS IAM Identity Center. The workspace uses the grafanaRole to make
+       * all AWS API calls (Athena, S3, DynamoDB, etc.).
+       */
+      const grafanaWorkspace = new grafana.CfnWorkspace(this, "QM-GrafanaWorkspace", {
+        accountAccessType: "CURRENT_ACCOUNT",
+        authenticationProviders: ["AWS_SSO"],
+        permissionType: "SERVICE_MANAGED",
+        name: "QuotaMonitorDashboard",
+        description: "Grafana workspace for Quota Monitor dashboard",
+        roleArn: grafanaRole.roleArn,
+        dataSources: ["ATHENA"],
+      });
+
+      // cdk-nag suppressions
+      NagSuppressions.addResourceSuppressions(
+        grafanaRole,
+        [
+          {
+            id: "AwsSolutions-IAM5",
+            reason: "Glue catalog actions do not support resource-level permissions. S3 and Athena resources are scoped.",
+          },
+        ],
+        true
+      );
+
+      new CfnOutput(this, "GrafanaWorkspaceUrl", {
+        value: `https://${grafanaWorkspace.attrEndpoint}`,
+        description: "Amazon Managed Grafana workspace URL",
+      });
+
+      new CfnOutput(this, "AthenaWorkgroup", {
+        value: "QuotaMonitorGrafana",
+        description: "Athena workgroup for Grafana queries",
+      });
+
+      new CfnOutput(this, "AthenaCatalog", {
+        value: "quota-monitor-ddb",
+        description: "Athena data catalog for DynamoDB",
+      });
+
+    } // end enableGrafana
 
     //=============================================================================================
     // Outputs
@@ -626,16 +890,6 @@ export class QuotaMonitorHubNoOU extends Stack {
     new CfnOutput(this, "SNSTopic", {
       value: snsPublisher.snsTopic.topicArn,
       description: "The SNS Topic where notifications are published to",
-    });
-
-    new CfnOutput(this, "DashboardBucket", {
-      value: dashboardBucket.bucketName,
-      description: "S3 bucket containing dashboard data for QuickSight",
-    });
-
-    new CfnOutput(this, "DashboardLimitCodesParameter", {
-      value: ssmDashboardLimitCodes.parameterName,
-      description: "SSM parameter for dashboard limit codes list",
     });
   }
 }

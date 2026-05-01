@@ -18,8 +18,9 @@
     "build:slackNotifier": "cd source/lambda/services/slackNotifier && npm run build:all",
     "build:snsPublisher": "cd source/lambda/services/snsPublisher && npm run build:all",
     "build:taRefresher": "cd source/lambda/services/taRefresher && npm run build:all",
+    "build:grafanaApi": "cd source/lambda/services/grafanaApi && npm run build:all",
     "build:utilsLayer": "cd source/lambda/utilsLayer && npm run build:all",
-    "build:all": "npm run build:utilsLayer && npm run build:cwPoller && npm run build:dashboardETL && npm run build:deploymentManager && npm run build:helper && npm run build:preReqManager && npm run build:quotaListManager && npm run build:reporter && npm run build:slackNotifier && npm run build:snsPublisher && npm run build:taRefresher",
+    "build:all": "npm run build:utilsLayer && npm run build:cwPoller && npm run build:dashboardETL && npm run build:deploymentManager && npm run build:helper && npm run build:preReqManager && npm run build:quotaListManager && npm run build:reporter && npm run build:slackNotifier && npm run build:snsPublisher && npm run build:taRefresher && npm run build:grafanaApi",
     "test": "cd ./deployment && chmod +x run-unit-tests.sh && ./run-unit-tests.sh"
   },
   "devDependencies": {

@@ -85,7 +85,7 @@ export function generateCWQueriesForAllQuotas(quotas: ServiceQuota[]) {
   const queries: MetricDataQuery[] = [];
   quotas.forEach((quota) => {
     try {
-      queries.push(...sq.generateCWQuery(quota, 3600));
+      queries.push(...sq.generateCWQuery(quota, METRIC_STATS_PERIOD));
     } catch (_) {
       // quota throws error with generating query
     }
@@ -175,6 +175,12 @@ export function createQuotaUtilizationEvents(
   const items: IQuotaUtilizationEvent[] = [];
 
   const sendOKNotifications = stringEqualsIgnoreCase(<string>process.env.REPORT_OK_NOTIFICATIONS, "Yes");
+  const okLimitCodesEnv = process.env.OK_NOTIFICATION_LIMIT_CODES || "";
+  const okLimitCodes = okLimitCodesEnv
+    .split(",")
+    .map((code) => code.trim())
+    .filter((code) => code.length > 0);
+
   utilizationValues.forEach((value, index) => {
     const quotaEvents: IQuotaUtilizationEvent = {
       status: QUOTA_STATUS.OK,
@@ -197,7 +203,14 @@ export function createQuotaUtilizationEvents(
     }
     quotaEvents["check-item-detail"]["Current Usage"] = "" + value + "%";
     quotaEvents["check-item-detail"].Timestamp = (<Date[]>metricData.Timestamps)[index];
-    if (sendOKNotifications || quotaEvents.status != QUOTA_STATUS.OK) {
+
+    // Always emit WARN and ERROR events.
+    // For OK events: emit only if REPORT_OK_NOTIFICATIONS is Yes AND either
+    // no specific limit codes are configured (report all) or this quota's
+    // code is in the OK_NOTIFICATION_LIMIT_CODES list.
+    const isOK = quotaEvents.status === QUOTA_STATUS.OK;
+    const okAllowed = sendOKNotifications && (okLimitCodes.length === 0 || okLimitCodes.includes(<string>quota.QuotaCode));
+    if (!isOK || okAllowed) {
       items.push(quotaEvents);
     }
   });

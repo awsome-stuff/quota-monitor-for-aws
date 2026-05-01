@@ -97,6 +97,14 @@ export class QuotaMonitorSQSpoke extends Stack {
       allowedValues: ["Yes", "No"],
     });
 
+    const okNotificationLimitCodes = new CfnParameter(this, "OKNotificationLimitCodes", {
+      type: "String",
+      default: "L-0263D0A3,L-0E3CBAB9,L-1216C47A,L-1945791B,L-2C3B7624,L-34B43A08,L-3819A6DF,L-3E6EC3A3,L-417A185B,L-43872EB7,L-43DA4232,L-4FB7FF5D,L-62499967,L-6B0D517C,L-6E869C2A,L-7029FAB6,L-7212CCBC,L-7295265B,L-74FC7D96,L-7A108150,L-85EED4F7,L-88CF9481,L-A1B5A36F,L-A2478D36,L-B5D1601B,L-B665C33B,L-B6F46B9C,L-B91E5754,L-DB2E81BA,L-E0233F82,L-E3A00192,L-F7808C92",
+      description:
+        "Comma-separated list of quota limit codes for which OK notifications should be reported. " +
+        "If empty and ReportOKNotifications is Yes, all OK notifications are reported.",
+    });
+
     const map = new CfnMapping(this, "QuotaMonitorMap");
     map.setValue("SSMParameters", "NotificationMutingConfig", "/QuotaMonitor/spoke/NotificationConfiguration");
 
@@ -325,6 +333,7 @@ export class QuotaMonitorSQSpoke extends Stack {
         POLLER_FREQUENCY: frequency.valueAsString,
         THRESHOLD: threshold.valueAsString,
         REPORT_OK_NOTIFICATIONS: reportOKNotifications.valueAsString,
+        OK_NOTIFICATION_LIMIT_CODES: okNotificationLimitCodes.valueAsString,
         LOG_LEVEL: LOG_LEVEL.DEBUG,
       },
       memorySize: 512,
