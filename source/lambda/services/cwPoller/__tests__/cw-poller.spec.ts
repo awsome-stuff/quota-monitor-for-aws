@@ -249,4 +249,120 @@ describe("CWPoller", () => {
 
     await expect(testCase).rejects.toThrow(UnsupportedEventException);
   });
+
+  describe("getCWDataForQuotaUtilization retry logic", () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      process.env.POLLER_FREQUENCY = "rate(6 hours)";
+    });
+
+    it("should retry and exclude the failing metric when a ValidationError occurs", async () => {
+      const validationError = new Error(
+        "Error in expression 'ec2_elasticip_none_resource_l0263d0a3_pct_utilization': Parameter metric is invalid. There is no service quota associated to this metric."
+      );
+      validationError.name = "ValidationError";
+
+      // First call fails, second call (without the bad metric) succeeds
+      getMetricDataMock
+        .mockRejectedValueOnce(validationError)
+        .mockResolvedValueOnce([metric1, metric2]);
+
+      const queries: MetricDataQuery[] = [
+        { Id: "ec2_elasticip_none_resource_l0263d0a3", MetricStat: {} as any, ReturnData: false },
+        { Id: "ec2_elasticip_none_resource_l0263d0a3_pct_utilization", Expression: "...", ReturnData: true },
+        { Id: "ec2_vcpu_standardondemand_resource_l1216c47a", MetricStat: {} as any, ReturnData: false },
+        { Id: "ec2_vcpu_standardondemand_resource_l1216c47a_pct_utilization", Expression: "...", ReturnData: true },
+      ];
+
+      const dataPoints = await getCWDataForQuotaUtilization(queries);
+
+      expect(getMetricDataMock).toHaveBeenCalledTimes(2);
+      expect(dataPoints).toEqual([metric1, metric2]);
+      // Second call should not include the failing metric queries
+      const secondCallArgs = getMetricDataMock.mock.calls[1][2];
+      expect(secondCallArgs).toHaveLength(2);
+      expect(secondCallArgs.find((q: MetricDataQuery) => q.Id?.includes("l0263d0a3"))).toBeUndefined();
+    });
+
+    it("should handle multiple failing metrics by retrying multiple times", async () => {
+      const error1 = new Error(
+        "Error in expression 'ec2_elasticip_none_resource_l0263d0a3_pct_utilization': Parameter metric is invalid."
+      );
+      error1.name = "ValidationError";
+
+      const error2 = new Error(
+        "Error in expression 'ec2_publicimagecount_none_resource_l0e3cbab9_pct_utilization': Parameter metric is invalid."
+      );
+      error2.name = "ValidationError";
+
+      getMetricDataMock
+        .mockRejectedValueOnce(error1)
+        .mockRejectedValueOnce(error2)
+        .mockResolvedValueOnce([metric1]);
+
+      const queries: MetricDataQuery[] = [
+        { Id: "ec2_elasticip_none_resource_l0263d0a3", MetricStat: {} as any, ReturnData: false },
+        { Id: "ec2_elasticip_none_resource_l0263d0a3_pct_utilization", Expression: "...", ReturnData: true },
+        { Id: "ec2_publicimagecount_none_resource_l0e3cbab9", MetricStat: {} as any, ReturnData: false },
+        { Id: "ec2_publicimagecount_none_resource_l0e3cbab9_pct_utilization", Expression: "...", ReturnData: true },
+        { Id: "ec2_vcpu_standardondemand_resource_l1216c47a", MetricStat: {} as any, ReturnData: false },
+        { Id: "ec2_vcpu_standardondemand_resource_l1216c47a_pct_utilization", Expression: "...", ReturnData: true },
+      ];
+
+      const dataPoints = await getCWDataForQuotaUtilization(queries);
+
+      expect(getMetricDataMock).toHaveBeenCalledTimes(3);
+      expect(dataPoints).toEqual([metric1]);
+    });
+
+    it("should return empty array when error message does not contain a query ID", async () => {
+      const unknownError = new Error("Something went wrong");
+      unknownError.name = "InternalServiceError";
+
+      getMetricDataMock.mockRejectedValueOnce(unknownError);
+
+      const queries: MetricDataQuery[] = [
+        { Id: "ec2_vcpu_standardondemand_resource_l1216c47a", MetricStat: {} as any, ReturnData: false },
+        { Id: "ec2_vcpu_standardondemand_resource_l1216c47a_pct_utilization", Expression: "...", ReturnData: true },
+      ];
+
+      const dataPoints = await getCWDataForQuotaUtilization(queries);
+
+      expect(getMetricDataMock).toHaveBeenCalledTimes(1);
+      expect(dataPoints).toEqual([]);
+    });
+
+    it("should return empty array when all queries are removed after retries", async () => {
+      const error = new Error(
+        "Error in expression 'ec2_elasticip_none_resource_l0263d0a3_pct_utilization': Parameter metric is invalid."
+      );
+      error.name = "ValidationError";
+
+      getMetricDataMock.mockRejectedValue(error);
+
+      const queries: MetricDataQuery[] = [
+        { Id: "ec2_elasticip_none_resource_l0263d0a3", MetricStat: {} as any, ReturnData: false },
+        { Id: "ec2_elasticip_none_resource_l0263d0a3_pct_utilization", Expression: "...", ReturnData: true },
+      ];
+
+      const dataPoints = await getCWDataForQuotaUtilization(queries);
+
+      expect(getMetricDataMock).toHaveBeenCalledTimes(1);
+      expect(dataPoints).toEqual([]);
+    });
+
+    it("should succeed on first try when no errors occur", async () => {
+      getMetricDataMock.mockResolvedValueOnce([metric1, metric2]);
+
+      const queries: MetricDataQuery[] = [
+        { Id: "ec2_vcpu_standardondemand_resource_l1216c47a", MetricStat: {} as any, ReturnData: false },
+        { Id: "ec2_vcpu_standardondemand_resource_l1216c47a_pct_utilization", Expression: "...", ReturnData: true },
+      ];
+
+      const dataPoints = await getCWDataForQuotaUtilization(queries);
+
+      expect(getMetricDataMock).toHaveBeenCalledTimes(1);
+      expect(dataPoints).toEqual([metric1, metric2]);
+    });
+  });
 });

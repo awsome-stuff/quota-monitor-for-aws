@@ -5,6 +5,7 @@
 #
 # Updates the SSM Parameter Store parameter /QuotaMonitor/DashboardLimitCodes
 # with a comma-separated list of quota codes.
+# Used in ETL workload.
 #
 # The parameter is of type StringList and is used by the Quota Monitor
 # dashboard to determine which EC2 quota codes to display.

@@ -67,7 +67,7 @@ export class QuotaMonitorHubNoOU extends Stack {
 
     const reportOKNotifications = new CfnParameter(this, "ReportOKNotifications", {
       type: "String",
-      default: "Yes",
+      default: "Yes", // Important: set to YES for the quota dashboard to correctly report data
       allowedValues: ["Yes", "No"],
     });
 

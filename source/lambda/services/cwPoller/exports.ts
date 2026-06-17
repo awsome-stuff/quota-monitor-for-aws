@@ -132,23 +132,94 @@ export async function getCWDataForQuotaUtilization(queries: MetricDataQuery[]) {
   const batches = batchQueries(queries);
 
   for (const batch of batches) {
+    const dataPoints = await executeGetMetricDataWithRetry(cw, batch);
+    allDataPoints.push(...dataPoints);
+  }
+
+  logger.debug({
+    label: "getCWDataForQuotaUtilization",
+    message: `Returning ${allDataPoints.length} metric results: ${JSON.stringify(allDataPoints.map(dp => ({ Id: dp.Id, Label: dp.Label, ValuesCount: dp.Values?.length ?? 0 })))}`,
+  });
+
+  return allDataPoints;
+}
+
+/**
+ * @description Executes GetMetricData with retry logic. If a ValidationError occurs,
+ * extracts the failing metric query ID from the error message, removes it from the batch,
+ * and retries. Repeats until the batch succeeds or no more failing metrics can be identified.
+ *
+ * Background: CloudWatch's GetMetricData API rejects the ENTIRE batch if any single
+ * metric expression is invalid. This commonly happens when a quota's SERVICE_QUOTA()
+ * expression has no association registered in CloudWatch for the target region — even
+ * though Service Quotas advertises the quota with a UsageMetric. For example, L-0263D0A3
+ * (EC2-VPC Elastic IPs) in eu-central-1 triggers:
+ *   "Error in expression '...': Parameter metric is invalid. There is no service quota
+ *    associated to this metric."
+ * Without this retry, one bad metric kills utilization reporting for ALL quotas in the batch.
+ */
+async function executeGetMetricDataWithRetry(cw: CloudWatchHelper, batch: MetricDataQuery[]): Promise<MetricDataResult[]> {
+  const MAX_RETRIES = 10;
+  let currentBatch = [...batch];
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const dataPoints = await cw.getMetricData(
         new Date(Date.now() - getFrequencyInHours() * 60 * 60 * 1000),
         new Date(),
-        batch
+        currentBatch
       );
-      allDataPoints.push(...dataPoints);
+      return dataPoints;
     } catch (error) {
-      if (error.name === "CloudWatchServiceException") {
-        logger.error(`Error occurred while getting metric data: ${error.message}`);
-      } else {
-        throw error;
+      const failingQueryId = extractFailingQueryIdFromError(error);
+
+      if (!failingQueryId) {
+        // Cannot identify the failing metric, log and give up on this batch
+        logger.error({
+          label: "getCWDataForQuotaUtilization/retry",
+          message: `Batch failed with non-recoverable error: ${error.name} - ${error.message}`,
+        });
+        return [];
+      }
+
+      // Remove the failing metric queries (both the raw metric and the _pct_utilization expression)
+      const baseId = failingQueryId.replace("_pct_utilization", "");
+      const beforeCount = currentBatch.length;
+      currentBatch = currentBatch.filter(
+        (q) => q.Id !== baseId && q.Id !== `${baseId}_pct_utilization`
+      );
+      const removedCount = beforeCount - currentBatch.length;
+
+      logger.debug({
+        label: "getCWDataForQuotaUtilization/retry",
+        message: `Attempt ${attempt + 1}: Excluding failing metric '${baseId}' (removed ${removedCount} queries). Remaining queries: ${currentBatch.length}`,
+      });
+
+      if (currentBatch.length === 0) {
+        logger.error({
+          label: "getCWDataForQuotaUtilization/retry",
+          message: `All queries removed after retries, no data to fetch`,
+        });
+        return [];
       }
     }
   }
 
-  return allDataPoints;
+  logger.error({
+    label: "getCWDataForQuotaUtilization/retry",
+    message: `Exceeded max retries (${MAX_RETRIES}), returning empty results`,
+  });
+  return [];
+}
+
+/**
+ * @description Extracts the failing metric query ID from a CloudWatch ValidationError message.
+ * Expected format: "Error in expression 'some_metric_id': Parameter metric is invalid..."
+ */
+function extractFailingQueryIdFromError(error: any): string | null {
+  if (!error.message) return null;
+  const match = error.message.match(/Error in expression '([^']+)'/);
+  return match ? match[1] : null;
 }
 
 /**
