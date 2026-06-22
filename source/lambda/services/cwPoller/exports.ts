@@ -279,6 +279,7 @@ export function createQuotaUtilizationEvents(
     // For OK events: emit only if REPORT_OK_NOTIFICATIONS is Yes AND either
     // no specific limit codes are configured (report all) or this quota's
     // code is in the OK_NOTIFICATION_LIMIT_CODES list.
+    // This is necessary to avoid flooding the SQS queue with too many messages.
     const isOK = quotaEvents.status === QUOTA_STATUS.OK;
     const okAllowed = sendOKNotifications && (okLimitCodes.length === 0 || okLimitCodes.includes(<string>quota.QuotaCode));
     if (!isOK || okAllowed) {
