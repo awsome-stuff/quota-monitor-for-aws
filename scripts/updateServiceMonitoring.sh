@@ -24,7 +24,7 @@
 
 set -euo pipefail
 
-TABLE="quota-monitor-sq-spoke-SQServiceTable0182B2D0-SMI5U9R29VPW"
+TABLE="quota-monitor-sq-spoke-SQServiceTableXXXXXXXX-XXXXXXXXXXXX"
 
 echo "Scanning table: $TABLE"
 
